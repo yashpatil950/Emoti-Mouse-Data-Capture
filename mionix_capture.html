@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mouse + EmotiBit Data Capture</title>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; }
+    .container { max-width: 960px; margin: 30px auto; }
+    h1 { color: #2c3e50; }
+    .stat-box { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .stat-box h4 { margin-top: 0; color: #555; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+    .badge-live { background: #27ae60; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+    .badge-stopped { background: #e74c3c; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+    /* Stable tables: column widths do not chase content; values use tabular figures. */
+    .stat-box table { width: 100%; font-size: 13px; table-layout: fixed; border-collapse: collapse; }
+    .stat-box td { padding: 4px 8px; vertical-align: top; }
+    .stat-box td:first-child { color: #888; width: 52%; word-wrap: break-word; overflow-wrap: break-word; }
+    .stat-box td:last-child {
+      font-weight: bold;
+      color: #2c3e50;
+      width: 48%;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* Equal-height cards in a row (avoids short panels “jumping” next to tall ones). */
+    .equal-height-row { display: flex; flex-wrap: wrap; }
+    .equal-height-row::before,
+    .equal-height-row::after { display: none; }
+    .equal-height-row > [class*="col-"] {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .equal-height-row .stat-box { flex: 1 1 auto; width: 100%; min-width: 0; margin-bottom: 16px; }
+    .btn-group { margin-bottom: 16px; }
+    #log { height: 150px; overflow-y: auto; background: #1e1e1e; color: #00ff88; font-family: monospace; font-size: 12px; padding: 10px; border-radius: 6px; }
+    .counter { font-size: 28px; font-weight: bold; color: #27ae60; font-variant-numeric: tabular-nums; min-width: 2.5ch; display: inline-block; text-align: right; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>🖱 Mionix + EmotiBit — Data Capture</h1>
+
+  <div class="stat-box">
+    <h4>Connection Status</h4>
+    <span id="connectLabel" class="label label-default">Mionix: Connecting...</span>
+    &nbsp;&nbsp;
+    <span id="emotibitConnectLabel" class="label label-default">EmotiBit bridge: Connecting...</span>
+    &nbsp;&nbsp;
+    <span id="captureStatus" class="badge-stopped">● Stopped</span>
+    &nbsp;&nbsp;
+    Rows captured: <span class="counter" id="rowCount">0</span>
+  </div>
+
+  <div class="btn-group">
+    <button class="btn btn-success" onclick="startCapture()">▶ Start Capture</button>
+    <button class="btn btn-danger" onclick="stopCapture()">■ Stop Capture</button>
+    <button class="btn btn-warning" onclick="clearData()">🗑 Clear Data</button>
+    <button class="btn btn-primary" onclick="downloadCSV()">⬇ Download CSV</button>
+    <button class="btn btn-default" onclick="downloadJSON()">⬇ Download JSON</button>
+    <button class="btn btn-info" onclick="downloadExcel()">⬇ Download Excel (Combined)</button>
+  </div>
+
+  <!-- Live Values (4× col-md-3 = 12 columns; was 4×4 and overflowed the grid) -->
+  <div class="row equal-height-row">
+    <div class="col-md-3">
+      <div class="stat-box">
+        <h4>❤️ Bio Metrics</h4>
+        <table>
+          <tr><td>Heart Rate State</td><td id="v_heartRateState">—</td></tr>
+          <tr><td>Heart Rate (BPM)</td><td id="v_heartRate">—</td></tr>
+          <tr><td>Heart Rate Quality (%)</td><td id="v_heartRateQuality">—</td></tr>
+          <tr><td>Heart Rate Avg</td><td id="v_heartRateAvg">—</td></tr>
+          <tr><td>Heart Rate Max</td><td id="v_heartRateMax">—</td></tr>
+          <tr><td>GSR (raw)</td><td id="v_gsr">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-box">
+        <h4>📡 Bio Raw</h4>
+        <table>
+          <tr><td>dt (ms since last sample)</td><td id="v_dt">—</td></tr>
+          <tr><td>Sensor Value</td><td id="v_rawHeartRate">—</td></tr>
+          <tr><td>Touch</td><td id="v_touch">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-box">
+        <h4>🖱 Mouse Speed</h4>
+        <table>
+          <tr><td>Speed (m/s)</td><td id="v_speed">—</td></tr>
+          <tr><td>Speed Avg</td><td id="v_speedAvg">—</td></tr>
+          <tr><td>Speed Max</td><td id="v_speedMax">—</td></tr>
+          <tr><td>Click Rate (cps)</td><td id="v_clickRate">—</td></tr>
+          <tr><td>Click Rate Avg</td><td id="v_clickRateAvg">—</td></tr>
+          <tr><td>Click Rate Max</td><td id="v_clickRateMax">—</td></tr>
+          <tr><td>Scroll Rate (cps)</td><td id="v_scrollRate">—</td></tr>
+          <tr><td>Scroll Rate Avg</td><td id="v_scrollRateAvg">—</td></tr>
+          <tr><td>Scroll Rate Max</td><td id="v_scrollRateMax">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-box">
+        <h4>⌚ EmotiBit (Live)</h4>
+        <table>
+          <tr><td>Last Stream Tag</td><td id="e_streamTag">—</td></tr>
+          <tr><td>Last Value</td><td id="e_streamValue">—</td></tr>
+          <tr><td>Heart Rate (HR/BPM)</td><td id="e_hr">—</td></tr>
+          <tr><td>Reliability</td><td id="e_reliability">—</td></tr>
+          <tr><td>EDA Overall (EA)</td><td id="e_ea">—</td></tr>
+          <tr><td>EDA Tonic (EL)</td><td id="e_el">—</td></tr>
+          <tr><td>EDA Phasic (ER)</td><td id="e_er">—</td></tr>
+          <tr><td>PPG (PI/PG)</td><td id="e_ppg">—</td></tr>
+          <tr><td>Temp (T0/T1)</td><td id="e_temp">—</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="row equal-height-row">
+    <div class="col-md-6">
+      <div class="stat-box">
+        <h4>📊 Streak Metrics (current gesture)</h4>
+        <table>
+          <tr><td>Streak Time (ms)</td><td id="v_streakTime">—</td></tr>
+          <tr><td>Streak Distance (mm)</td><td id="v_streakDistance">—</td></tr>
+          <tr><td>Streak Scrolls</td><td id="v_streakScrolls">—</td></tr>
+          <tr><td>Streak Clicks</td><td id="v_streakClicks">—</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="stat-box">
+        <h4>💾 Total Metrics (since factory reset)</h4>
+        <table>
+          <tr><td>Total Time (ms)</td><td id="v_totalTime">—</td></tr>
+          <tr><td>Total Distance (mm)</td><td id="v_totalDistance">—</td></tr>
+          <tr><td>Total Scrolls</td><td id="v_totalScrolls">—</td></tr>
+          <tr><td>Total Clicks</td><td id="v_totalClicks">—</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-box">
+    <h4>📋 Live Log</h4>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+  var capturing = false;
+  var capturedRows = [];
+  var rowCount = 0;
+  var lastEmotiByTag = {};
+
+  function formatLocalTimestamp(d) {
+    var pad = function(n) { return String(n).padStart(2, "0"); };
+    var year = d.getFullYear();
+    var month = pad(d.getMonth() + 1);
+    var day = pad(d.getDate());
+    var hour = pad(d.getHours());
+    var minute = pad(d.getMinutes());
+    var second = pad(d.getSeconds());
+    var ms = String(d.getMilliseconds()).padStart(3, "0");
+    var tzMinutes = -d.getTimezoneOffset();
+    var sign = tzMinutes >= 0 ? "+" : "-";
+    var absMins = Math.abs(tzMinutes);
+    var tzHour = pad(Math.floor(absMins / 60));
+    var tzMin = pad(absMins % 60);
+    return year + "-" + month + "-" + day + "T" + hour + ":" + minute + ":" + second + "." + ms + sign + tzHour + ":" + tzMin;
+  }
+
+  function detectGsrValue(d) {
+    if (!d || typeof d !== "object") return null;
+    var keys = ["gsr", "GSR", "galvanicSkinResponse", "skinConductance", "eda"];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (d[k] !== undefined && d[k] !== null && d[k] !== "") return d[k];
+    }
+    return null;
+  }
+
+  // ---- WebSocket ----
+  var ws = new WebSocket("ws://localhost:7681", "mionix-beta");
+
+  ws.onopen = function() {
+    $("#connectLabel").removeClass("label-default").addClass("label-success").text("Mionix: Connected");
+    ws.send(JSON.stringify({ type: 'getDevices' }));
+    log("WebSocket connected.");
+  };
+
+  ws.onerror = function() {
+    $("#connectLabel").removeClass("label-default").addClass("label-danger").text("Mionix: Not connected");
+    log("WebSocket error — is Mionix Device Hub running?");
+  };
+
+  // ---- EmotiBit bridge WebSocket (served by local Python bridge) ----
+  var emotibitWs = new WebSocket("ws://localhost:8765");
+
+  emotibitWs.onopen = function() {
+    $("#emotibitConnectLabel").removeClass("label-default").addClass("label-success").text("EmotiBit bridge: Connected");
+    log("EmotiBit bridge connected.");
+  };
+
+  emotibitWs.onerror = function() {
+    $("#emotibitConnectLabel").removeClass("label-default").addClass("label-danger").text("EmotiBit bridge: Not connected");
+    log("EmotiBit bridge error — start emotibit_ws_bridge.py");
+  };
+
+  emotibitWs.onmessage = function(message) {
+    try {
+      var pkt = JSON.parse(message.data);
+      updateEmotiBit(pkt);
+      if (capturing) recordEmotiBitRow(pkt);
+    } catch (e) {}
+  };
+
+  ws.onmessage = function(message) {
+    var data = JSON.parse(message.data);
+    if (data.type === "devices" || data.type === "deviceChanged") {
+      log("Device event: " + data.type);
+    } else if (data.type === "bioMetrics") {
+      updateBioMetrics(data);
+      if (capturing) recordRow("bioMetrics", data);
+    } else if (data.type === "bioRaw") {
+      updateBioRaw(data);
+      if (capturing) recordRow("bioRaw", data);
+    } else if (data.type === "mouseMetrics") {
+      updateMouseMetrics(data);
+      if (capturing) recordRow("mouseMetrics", data);
+    }
+  };
+
+  // ---- Update Live UI ----
+  function set(id, val) { document.getElementById(id).textContent = (val !== undefined && val !== null) ? val : "—"; }
+
+  function updateBioMetrics(d) {
+    set("v_heartRateState", d.heartRateState);
+    set("v_heartRate", d.heartRate);
+    set("v_heartRateQuality", d.heartRateQuality);
+    set("v_heartRateAvg", d.heartRateAvg);
+    set("v_heartRateMax", d.heartRateMax);
+    var g = detectGsrValue(d);
+    var gNum = Number(g);
+    set("v_gsr", isFinite(gNum) ? gNum : "—");
+  }
+
+  function updateBioRaw(d) {
+    set("v_dt", d.dt);
+    set("v_rawHeartRate", d.heartRate);
+    set("v_touch", d.touch);
+    var g = detectGsrValue(d);
+    if (g !== null) {
+      var gNum = Number(g);
+      set("v_gsr", isFinite(gNum) ? gNum : "—");
+    }
+  }
+
+  function updateMouseMetrics(d) {
+    set("v_speed", d.speed);
+    set("v_speedAvg", d.speedAvg);
+    set("v_speedMax", d.speedMax);
+    set("v_clickRate", d.clickRate);
+    set("v_clickRateAvg", d.clickRateAvg);
+    set("v_clickRateMax", d.clickRateMax);
+    set("v_scrollRate", d.scrollRate);
+    set("v_scrollRateAvg", d.scrollRateAvg);
+    set("v_scrollRateMax", d.scrollRateMax);
+    set("v_streakTime", d.streakTime);
+    set("v_streakDistance", d.streakDistance);
+    set("v_streakScrolls", d.streakScrolls);
+    set("v_streakClicks", d.streakClicks);
+    set("v_totalTime", d.totalTime);
+    set("v_totalDistance", d.totalDistance);
+    set("v_totalScrolls", d.totalScrolls);
+    set("v_totalClicks", d.totalClicks);
+  }
+
+  function updateEmotiBit(pkt) {
+    var tag = pkt.stream_tag || "—";
+    var value = (pkt.value !== undefined && pkt.value !== null) ? pkt.value : "—";
+    var reliability = (pkt.reliability !== undefined && pkt.reliability !== null) ? pkt.reliability : "—";
+    set("e_streamTag", tag);
+    set("e_streamValue", value);
+    set("e_reliability", reliability);
+
+    if (tag && value !== "—") {
+      lastEmotiByTag[tag] = value;
+      // Also keep uppercase aliases so lookup works for mixed-case stream tags.
+      lastEmotiByTag[String(tag).toUpperCase()] = value;
+    }
+    set("e_hr", firstAvailableTag(["HR", "BPM", "HEART_RATE", "HRM"]));
+    set("e_ea", tagVal("EA") ? "EA: " + tagVal("EA") : "—");
+    set("e_el", tagVal("EL") ? "EL: " + tagVal("EL") : "—");
+    set("e_er", tagVal("ER") ? "ER: " + tagVal("ER") : "—");
+    set("e_ppg", firstAvailableTag(["PI", "PG", "PPG"]));
+    set("e_temp", [tagVal("T0"), tagVal("T1")].filter(Boolean).join(" / ") || "—");
+  }
+
+  function tagVal(tag) {
+    return (lastEmotiByTag[tag] !== undefined && lastEmotiByTag[tag] !== null) ? String(lastEmotiByTag[tag]) : "";
+  }
+
+  function firstAvailableTag(tags) {
+    for (var i = 0; i < tags.length; i++) {
+      var v = tagVal(tags[i]);
+      if (v) return tags[i] + ": " + v;
+    }
+    return "—";
+  }
+
+  // ---- Capture ----
+  function recordRow(type, data) {
+    var now = new Date();
+    var row = {
+      timestamp: formatLocalTimestamp(now),        // Local timestamp with timezone offset
+      messageType: type
+    };
+    Object.assign(row, data);
+    var g = detectGsrValue(data);
+    if (g !== null) row.gsr = Number(g);
+    capturedRows.push(row);
+    rowCount++;
+    document.getElementById("rowCount").textContent = rowCount;
+  }
+
+  function recordEmotiBitRow(pkt) {
+    var now = new Date();
+    var row = {
+      timestamp: formatLocalTimestamp(now),
+      source: "emotibit",
+      messageType: "emotibitStream",
+      emotibit_time: pkt.emotibit_time || "",
+      stream_tag: pkt.stream_tag || "",
+      reliability: pkt.reliability || "",
+      value: pkt.value !== undefined ? pkt.value : "",
+      unix_ms: pkt.unix_ms || Date.now()
+    };
+    capturedRows.push(row);
+    rowCount++;
+    document.getElementById("rowCount").textContent = rowCount;
+  }
+
+  function startCapture() {
+    capturing = true;
+    document.getElementById("captureStatus").className = "badge-live";
+    document.getElementById("captureStatus").textContent = "● Recording";
+    log("Capture started.");
+  }
+
+  function stopCapture() {
+    capturing = false;
+    document.getElementById("captureStatus").className = "badge-stopped";
+    document.getElementById("captureStatus").textContent = "● Stopped";
+    log("Capture stopped. " + rowCount + " rows recorded.");
+  }
+
+  function clearData() {
+    capturedRows = [];
+    rowCount = 0;
+    document.getElementById("rowCount").textContent = 0;
+    log("Data cleared.");
+  }
+
+  // ---- Export CSV ----
+  function downloadCSV() {
+    if (capturedRows.length === 0) { alert("No data captured yet."); return; }
+
+    // Collect all unique keys
+    var keys = [];
+    capturedRows.forEach(function(row) {
+      Object.keys(row).forEach(function(k) { if (keys.indexOf(k) === -1) keys.push(k); });
+    });
+
+    var lines = [keys.join(",")];
+    capturedRows.forEach(function(row) {
+      var line = keys.map(function(k) {
+        var v = row[k] !== undefined ? row[k] : "";
+        return '"' + String(v).replace(/"/g, '""') + '"';
+      });
+      lines.push(line.join(","));
+    });
+
+    download("mionix_data.csv", lines.join("\n"), "text/csv");
+  }
+
+  // ---- Export JSON ----
+  function downloadJSON() {
+    if (capturedRows.length === 0) { alert("No data captured yet."); return; }
+    download("mionix_data.json", JSON.stringify(capturedRows, null, 2), "application/json");
+  }
+
+  function download(filename, content, mime) {
+    var blob = new Blob([content], { type: mime });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+  }
+
+  function toUnixMs(ts) {
+    var ms = Date.parse(ts);
+    return isNaN(ms) ? null : ms;
+  }
+
+  function nearestByTime(targetMs, rows, tolMs) {
+    var best = null;
+    var bestDiff = Number.MAX_SAFE_INTEGER;
+    for (var i = 0; i < rows.length; i++) {
+      var t = rows[i].unix_ms_num;
+      if (t === null || t === undefined) continue;
+      var diff = Math.abs(t - targetMs);
+      if (diff <= tolMs && diff < bestDiff) {
+        best = rows[i];
+        bestDiff = diff;
+      }
+    }
+    return best;
+  }
+
+  function normalizeTag(tag) {
+    return (tag === undefined || tag === null) ? "" : String(tag).toUpperCase();
+  }
+
+  function normalizeEmotiBitValue(value) {
+    if (value === undefined || value === null || value === "") return "";
+    if (typeof value === "number") return value;
+
+    var str = String(value).trim();
+    if (str === "") return "";
+
+    // EmotiBit packets can contain multiple samples in one payload.
+    // Use the last sample for sync/export to keep one scalar per cell.
+    if (str.indexOf(",") !== -1) {
+      var samples = str.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s !== ""; });
+      if (samples.length > 0) str = samples[samples.length - 1];
+    }
+
+    var num = Number(str);
+    return isFinite(num) ? num : str;
+  }
+
+  function isTagIn(tag, allowedTags) {
+    return allowedTags.indexOf(normalizeTag(tag)) !== -1;
+  }
+
+  function estimateNominalSrate(rows) {
+    var deltas = [];
+    for (var i = 1; i < rows.length; i++) {
+      var prev = rows[i - 1].unix_ms;
+      var curr = rows[i].unix_ms;
+      if (!isFinite(prev) || !isFinite(curr)) continue;
+      var d = curr - prev;
+      if (d > 0) deltas.push(d);
+    }
+    if (deltas.length === 0) return null;
+    deltas.sort(function(a, b) { return a - b; });
+    var mid = Math.floor(deltas.length / 2);
+    var median = (deltas.length % 2 === 0) ? (deltas[mid - 1] + deltas[mid]) / 2 : deltas[mid];
+    if (!isFinite(median) || median <= 0) return null;
+    return Number((1000 / median).toFixed(3));
+  }
+
+  function buildEmotiBitInfo(emotiRows, stamp) {
+    var byTag = {};
+    emotiRows.forEach(function(r) {
+      var tag = normalizeTag(r.stream_tag);
+      if (!tag) return;
+      if (!byTag[tag]) byTag[tag] = [];
+      byTag[tag].push(r);
+    });
+
+    var streamInfo = Object.keys(byTag).sort().map(function(tag) {
+      var rows = byTag[tag].slice().sort(function(a, b) { return a.unix_ms - b.unix_ms; });
+      var packedCount = rows.filter(function(r) { return String(r.raw_value || "").indexOf(",") !== -1; }).length;
+      return {
+        typeTags: [tag],
+        sample_count: rows.length,
+        nominal_srate_hz_est: estimateNominalSrate(rows),
+        packed_payload_count: packedCount,
+        value_rule: "last_sample_if_payload_has_multiple_values",
+        first_timestamp: rows[0] ? rows[0].timestamp : "",
+        last_timestamp: rows[rows.length - 1] ? rows[rows.length - 1].timestamp : ""
+      };
+    });
+
+    return [{
+      info: {
+        name: "Mouse + EmotiBit Capture",
+        type: "Multimodal",
+        source_id: "mionix_capture.html",
+        created_at: stamp,
+        capture_notes: "Generated by combined dashboard export; metadata estimated from captured EmotiBit packets."
+      }
+    }].concat(streamInfo.map(function(s) { return { info: s }; }));
+  }
+
+  function downloadExcel() {
+    if (capturedRows.length === 0) { alert("No data captured yet."); return; }
+
+    // Build mouse timeline from bioMetrics only to avoid sparse bioRaw-only rows.
+    var mouseRows = capturedRows.filter(function(r) {
+      return r.messageType === "bioMetrics";
+    }).map(function(r) {
+      return {
+        timestamp: r.timestamp,
+        unix_ms: toUnixMs(r.timestamp),
+        messageType: r.messageType,
+        heartRate: (r.heartRate !== undefined && r.heartRate !== null && r.heartRate !== "") ? Number(r.heartRate) : "",
+        gsr: (r.gsr !== undefined && r.gsr !== null && r.gsr !== "") ? Number(r.gsr) : ""
+      };
+    });
+
+    var emotiRows = capturedRows.filter(function(r) {
+      return r.source === "emotibit" || r.messageType === "emotibitStream";
+    }).map(function(r) {
+      var unixMs = (r.unix_ms !== undefined && r.unix_ms !== null && r.unix_ms !== "") ? Number(r.unix_ms) : toUnixMs(r.timestamp);
+      return {
+        timestamp: r.timestamp,
+        unix_ms: unixMs,
+        emotibit_time: r.emotibit_time || "",
+        stream_tag: r.stream_tag || "",
+        raw_value: r.value !== undefined ? r.value : "",
+        value: normalizeEmotiBitValue(r.value),
+        reliability: r.reliability || ""
+      };
+    });
+
+    var emotiHrRows = emotiRows.filter(function(r) {
+      return isTagIn(r.stream_tag, ["HR", "BPM", "HEART_RATE", "HRM"]);
+    });
+
+    var emotiEaRows = emotiRows.filter(function(r) {
+      return isTagIn(r.stream_tag, ["EA"]);
+    });
+
+    var emotiElRows = emotiRows.filter(function(r) {
+      return isTagIn(r.stream_tag, ["EL"]);
+    });
+
+    var emotiErRows = emotiRows.filter(function(r) {
+      return isTagIn(r.stream_tag, ["ER"]);
+    });
+
+    mouseRows.forEach(function(r) { r.unix_ms_num = r.unix_ms; });
+    emotiRows.forEach(function(r) { r.unix_ms_num = r.unix_ms; });
+
+    var syncTol = 1000;
+    var synced = mouseRows.map(function(m) {
+      var eAny = nearestByTime(m.unix_ms_num, emotiRows, syncTol);
+      var eHr = nearestByTime(m.unix_ms_num, emotiHrRows, syncTol);
+      var eEa = nearestByTime(m.unix_ms_num, emotiEaRows, syncTol);
+      var eEl = nearestByTime(m.unix_ms_num, emotiElRows, syncTol);
+      var eEr = nearestByTime(m.unix_ms_num, emotiErRows, syncTol);
+      return {
+        timestamp: m.timestamp,
+        unix_ms: m.unix_ms,
+        mouse_heartRate: m.heartRate,
+        mouse_gsr: m.gsr,
+        emotibit_hr: eHr ? eHr.value : "",
+        emotibit_EA: eEa ? eEa.value : "",
+        emotibit_EL: eEl ? eEl.value : "",
+        emotibit_ER: eEr ? eEr.value : "",
+        emotibit_nearest_any_tag: eAny ? eAny.stream_tag : ""
+      };
+    }).filter(function(r) {
+      // Keep only fully populated rows for direct analysis.
+      return r.mouse_heartRate !== "" &&
+             r.mouse_gsr !== "" &&
+             r.emotibit_hr !== "" &&
+             (r.emotibit_EA !== "" || r.emotibit_EL !== "" || r.emotibit_ER !== "");
+    });
+
+    var wb = XLSX.utils.book_new();
+    var wsMouse = XLSX.utils.json_to_sheet(mouseRows.map(function(r) {
+      return {
+        timestamp: r.timestamp,
+        unix_ms: r.unix_ms,
+        messageType: r.messageType,
+        heartRate: r.heartRate,
+        gsr: r.gsr
+      };
+    }));
+    var wsEmoti = XLSX.utils.json_to_sheet(emotiRows.map(function(r) {
+      return {
+        timestamp: r.timestamp,
+        unix_ms: r.unix_ms,
+        emotibit_time: r.emotibit_time,
+        stream_tag: r.stream_tag,
+        value: r.value,
+        reliability: r.reliability
+      };
+    }));
+    var wsSynced = XLSX.utils.json_to_sheet(synced.map(function(r) {
+      return {
+        timestamp: r.timestamp,
+        unix_ms: r.unix_ms,
+        mouse_heartRate: r.mouse_heartRate,
+        mouse_gsr: r.mouse_gsr,
+        emotibit_heartRate: r.emotibit_hr,
+        emotibit_EA: r.emotibit_EA,
+        emotibit_EL: r.emotibit_EL,
+        emotibit_ER: r.emotibit_ER
+      };
+    }));
+
+    XLSX.utils.book_append_sheet(wb, wsMouse, "Mouse_HR_GSR");
+    XLSX.utils.book_append_sheet(wb, wsEmoti, "EmotiBit_Raw");
+    XLSX.utils.book_append_sheet(wb, wsSynced, "Synced_Comparison");
+
+    var stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    XLSX.writeFile(wb, "combined_capture_" + stamp + ".xlsx");
+
+    // Export companion metadata similar to EmotiBit *_info.json.
+    var infoPayload = buildEmotiBitInfo(emotiRows, stamp);
+    download("combined_capture_" + stamp + "_info.json", JSON.stringify(infoPayload, null, 2), "application/json");
+  }
+
+  // ---- Log ----
+  function log(msg) {
+    var el = document.getElementById("log");
+    var t = new Date().toLocaleTimeString();
+    el.innerHTML += "[" + t + "] " + msg + "\n";
+    el.scrollTop = el.scrollHeight;
+  }
+</script>
+</body>
+</html>

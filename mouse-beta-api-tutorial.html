@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+        <script type="text/javascript">
+            $(function() {
+                var WebSocket = window.WebSocket || window.MozWebSocket;
+                var mionixSocket = new WebSocket("ws://localhost:7681", "mionix-beta");
+
+                mionixSocket.onopen = function () {
+                  $("#connectLabel").addClass("label-success");
+                  $("#connectLabel").text("Connected");
+                  mionixSocket.send(JSON.stringify({ type: 'getDevices' }));
+                };
+
+                mionixSocket.onerror = function () {
+                  $("#connectLabel").addClass("label-danger");
+                  $("#connectLabel").text("Not connected");
+                };
+
+                mionixSocket.onmessage = function (message) {
+                  var data = JSON.parse(message.data);
+                  if (data.type == "devices" || data.type == "deviceChanged")
+                    $("#devicesInfo").html(JSON.stringify(data, null, 2));
+                  else if (data.type == "mouseMetrics")
+                    $("#mouseMetrics").html(JSON.stringify(data, null, 2));
+                  else if (data.type == "bioMetrics")
+                    $("#bioMetrics").html(JSON.stringify(data, null, 2));
+                  else if (data.type == "bioRaw")
+                    $("#bioRaw").html(JSON.stringify(data, null, 2));
+                };
+            });
+        </script>
+        </head>
+    <body >
+      <div style="max-width: 65rem; margin: auto;">
+        <h1>Mionix BETA API Tutorial</h1>
+
+        <p> In this tutorial we will illustrate how you can connect to the <em>Mionix Device Hub</em> running on your PC through a WebSocket API in order to interact with your <em>Naos QG</em>. It is assumed that you know some web development and that you are familiar with <a>JQuery</a> and <a>Bootstrap 3</a>, since we will be using these libraries for illustrating the API. They are ofcourse not required and you may choose any other framework. </p>
+
+        <h2>Connecting to Mionix Device Hub</h2>
+
+        <p> First of all you need to create a new WebSocket in your javascript by connecting to the Hub at <code> ws://localhost:7681 </code>. The API is specified by the protocol name <code>mionix-beta</code>. Here is an example on how to connect to the Hub and detect a successful connection:</p>
+        <pre>
+var mionixSocket = new WebSocket("ws://localhost:7681", "mionix-beta");
+
+mionixSocket.onopen = function () {
+  // Assuming there is a html element with id="connectLabel" and class="label label-default".
+  $("#connectLabel").addClass("label-success");
+  $("#connectLabel").text("Connected");
+};
+
+mionixSocket.onerror = function () {
+  $("#connectLabel").addClass("label-danger");
+  $("#connectLabel").text("Not connected");
+};
+        </pre>
+
+        <p>Below is a demonstration of the above code. If the server is running then you should see <span class="label label-success">Connected</span>, otherwise you should see a <span class="label label-danger">Not Connected</span>. Note, that you might need to refresh the page if you recently started the Hub.</p>
+
+        <div class="panel panel-success">
+          <div class="panel-heading"><span class="badge">Live</span> Connection Demo </div>
+          <div class="panel-body">
+            <span id="connectLabel" class="label label-default">Connecting</span>
+          </div>
+        </div>
+
+        <h2>Device information</h2>
+
+        <p>Whenever a Naos QG is plugged in or plugged out, a message (a JSON object) with attribute <code>"type": "devices"</code>, is sent to all connected WebSocket clients. Whenever the dpi or the profile of the mouse is changed a message with attribute <code>"type": "deviceChanged"</code> is sent. Here is an example on how to receive these messages on the client side:</p>
+
+        <pre>
+mionixSocket.onmessage = function (message) {
+  var data = JSON.parse(message.data);
+  if (data.type == "devices") {
+    // Handle devices message here:
+  }
+  else if (data.type == "deviceChanged") {
+    // Handle deviceChanged message here:
+  }
+};
+        </pre>
+
+        <p>When plugging out your Naos QG, the message will only contain the "type" property. But when plugging it back in, the message will also have an array <code>"devices": [ ... ]</code> containing objects with information about the connected devices. Each object in the array will have the following attributes. </p>
+
+        <ul>
+        <li> String <code>type</code> will always be "devices".
+        <li> Object <code>deviceInfo</code> containing the device name, firmware version and whether it is "normal" or "boot" mode. </li>
+        <li> Object <code>capabilities</code> containing various device specific contants. </li>
+        <li> Array <code>profiles</code> listing all the profiles and their current values. </li>
+        <li> Number <code>selectedProfileIndex</code> showing the index of the selected profile in the profiles array. </li>
+        <li> Number <code>selectedProfileIndex</code> showing the index of the selected dpi in the selected profile. </li>
+        </ul>
+
+        <p>Whenever the mouse dpi or profile changes (by clicking the dpi or profile mouse button) a message containing information about that change is sent to all clients. </p>
+
+        <ul>
+        <li> String <code>type</code> will always be "deviceChanged".
+        <li> Number <code>deviceIndex</code> showing the index of the device in the "devices" array. </li>
+        <li> Number <code>selectedProfileIndex</code> showing the new index of the selected profile in the profiles array. </li>
+        <li> Number <code>selectedProfileIndex</code> showing the new index of the selected dpi in the selected profile. </li>
+        </ul>
+
+        <p>Below is a demonstration of the above code. Plug/unplug your Naos QG or change its dpi/profile to see what message is sent:</p>
+
+        <div class="panel panel-success">
+          <div class="panel-heading"><span class="badge">Live</span> Devices Demo </div>
+          <div class="panel-body">
+            <pre id="devicesInfo" style="max-height: 40rem;"></pre>
+          </div>
+        </div>
+
+        <h2>Mouse metrics</h2>
+
+        <p>While your Naos QG is plugged in (and not in boot mode), a message (a JSON object) with attribute <code>"type": "mouseMetrics"</code> and another message with attribute <code>"type": "mouseMetrics"</code> are continiously sent to all connected WebSocket clients. Here is an example on how to receive these messages on the client side:</p>
+
+        <pre>
+mionixSocket.onmessage = function (message) {
+  var data = JSON.parse(message.data);
+  if (data.type == "bioMetrics") {
+    // Handle bio metrics message here:
+  }
+  else if (data.type == "bioRaw") {
+    // Handle bio metrics message here:
+  }
+  else if (data.type == "mouseMetrics") {
+    // Handle mouse metrics message here:
+  }
+};
+        </pre>
+
+        <h3>bioMetrics</h3>
+        <p>The <em>bioMetrics</em> message will have the following attributes:</p>
+        <ul>
+        <li> <code>heartRateState</code> the current state of the heart rate sensor. </li>
+        <li> <code>heartRate</code> the current heart beats per minute. </li>
+        <li> <code>heartRateQuality</code> the quality of the current measurement in percentage. </li>
+        <li> <code>heartRateAvg</code> the average heart beats per minute since a few seconds. </li>
+        <li> <code>heartRateMax</code> the maximum heart beats per minute since a few seconds. </li>
+        </ul>
+
+        <p>The <code>heartRateState</code> attribute will have the string value <code>"idle"</code> while the sensor is not active. When the user's hand is on the sensor and the calculation is in progress the value will be <code>"preparing"</code>. Finally the value should switch to <code>"active"</code>, which is when you may read the attribute <code>heartRate</code> to get the calculated bpm along with <code>heartRateQuality</code> indicating the quality of the calculation between 0 and 100 percent.</p>
+        
+        <p>If the user takes the hand off for a short while, the state will go thorugh the phases <code>"recovery_idle"</code> and <code>"recovery_preparing"</code> while the sensor is trying to pick up the heart rate again. While in recovery mode, the previous heart rate is still shown.</p>
+
+        <p>If the user has turned off the sensor the value will be <code>"off"</code>.</p>
+
+        <h3>bioRaw</h3>
+        <p>The <em>bioRaw</em>, available from Hub version 0.13, contains the raw value from the sensor. This message is only sent when the sensor is on. Note that the sensor is switched off a few seconds after the sensor detects that there's no touch.</p>
+        <ul>
+        <li> <code>dt</code> times in ms since laste sample.</li>
+        <li> <code>heartRate</code> reflective value from the sensor.</li>
+        <li> <code>touch</code> indicates hand on or off.</li>
+        </ul>
+
+        <h3>mouseMetrics</h3>
+        <p>The <em>mouseMetrics</em> message will have the following attributes:</p>   
+
+        <ul>
+        <li> <code>totalTime</code> the time the mouse has been active since factory reset. </li>
+        <li> <code>totalDistance</code> the distance moved since factory reset. </li>
+        <li> <code>totalScrolls</code> the number of steps scrolled since factory reset. </li>
+        <li> <code>totalClicks</code> the number of clicks since factory reset. </li>
+        <br>
+        <li> <code>streakTime</code> the time the mouse has been active during the last continuous gesture. </li>
+        <li> <code>streakDistance</code> the distance moved (in millimeters) during the last continuous gesture. </li>
+        <li> <code>streakScrolls</code> the number of steps scrolled during the last continuous gesture. </li>
+        <li> <code>streakClicks</code> the number of clicks during the last continuous gesture. </li>
+        <br>
+        <li> <code>speed</code> The current movement speed of the mouse. </li>
+        <li> <code>speedAvg</code> The average movement speed since a few seconds. </li>
+        <li> <code>speedMax</code> The maximum movement speed since a few seconds. </li>
+        <li> <code>clickRate</code> The current click rate of the mouse. </li>
+        <li> <code>clickRateAvg</code> The average movement click rate since a few seconds. </li>
+        <li> <code>clickRateMax</code> The maximum movement click rate since a few seconds. </li>
+        <li> <code>scrollRate</code> The current scroll rate of the mouse. </li>
+        <li> <code>scrollRateAvg</code> The average movement scroll rate since a few seconds. </li>
+        <li> <code>scrollRateMax</code> The maximum movement scroll rate since a few seconds. </li>
+        </ul>
+
+        <p>The attributes starting with <code>"total*"</code>  are saved on the flash memory of the Naos QG and contain data since the device was last reset. This data is not lost when upgrading the firmware. However in order to protect the device memory from wearing out, the total metrics are never saved more than every 10 minutes. This means that the total values might decrease slightly to the last saved state after replugging your Naos QG.</p>
+
+        <p>All times are given in <em>milliseconds</em>, distances in <em>millimeters</em> and speed in <em>meters per second</em>. Click rates and scroll rates are given in <em>counts per second</em>. </p>        
+
+        <p>Below is a demonstration of the above code. Make sure your Naos QG is plugged in to see what information is sent in the bioMetrics and mouseMetrics messages:</p>
+
+        <div class="panel panel-success">
+          <div class="panel-heading"><span class="badge">Live</span> Mouse Metrics Demo </div>
+          <div class="panel-body">
+            <pre id="bioMetrics"></pre>
+            <pre id="bioRaw"></pre>
+            <pre id="mouseMetrics"></pre>
+          </div>
+        </div>
+
+      </div>
+    </body>
+</html>
